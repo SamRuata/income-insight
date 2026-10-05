@@ -1,0 +1,14 @@
+# Reference configuration: the simplest architecture that meets the
+# "at least two hidden layers" requirement. Everything else is compared
+# against this.
+name: baseline
+hidden_sizes: [64, 32]
+activation: relu
+dropout: 0.0
+lr: 0.001
+weight_decay: 0.0
+batch_size: 256
+epochs: 40
+patience: 5          # stop if val loss has not improved for this many epochs
+seed: 42
+notes: "2 hidden layers, ReLU, no regularization."

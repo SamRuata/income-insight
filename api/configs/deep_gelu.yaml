@@ -1,0 +1,14 @@
+# Changes two things against baseline: one more hidden layer (depth) and
+# GELU instead of ReLU (smooth activation). Tests whether extra capacity
+# helps on a dataset this size, or just overfits.
+name: deep_gelu
+hidden_sizes: [128, 64, 32]
+activation: gelu
+dropout: 0.0
+lr: 0.001
+weight_decay: 0.0
+batch_size: 256
+epochs: 40
+patience: 5
+seed: 42
+notes: "3 hidden layers, GELU, no regularization."

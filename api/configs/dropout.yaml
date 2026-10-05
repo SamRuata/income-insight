@@ -1,0 +1,14 @@
+# Baseline architecture with dropout and weight decay switched on.
+# Isolates the effect of regularization: same width, same depth,
+# same activation as baseline.
+name: dropout
+hidden_sizes: [64, 32]
+activation: relu
+dropout: 0.3
+lr: 0.001
+weight_decay: 0.0001
+batch_size: 256
+epochs: 40
+patience: 5
+seed: 42
+notes: "2 hidden layers, ReLU, dropout 0.3 + weight decay."
