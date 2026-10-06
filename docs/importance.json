@@ -1,0 +1,68 @@
+{
+  "config": "baseline",
+  "baseline_roc_auc": 0.9147569721261571,
+  "n_rows": 6000,
+  "n_repeats": 5,
+  "importances": [
+    {
+      "feature": "marital_status",
+      "auc_drop": 0.05689147119177525,
+      "std": 0.0028626498762490686
+    },
+    {
+      "feature": "capital_gain",
+      "auc_drop": 0.037230628299278326,
+      "std": 0.001785662689125362
+    },
+    {
+      "feature": "age",
+      "auc_drop": 0.037153852591863566,
+      "std": 0.00135917313706045
+    },
+    {
+      "feature": "education_num",
+      "auc_drop": 0.03268138890874339,
+      "std": 0.0009154025099714173
+    },
+    {
+      "feature": "occupation",
+      "auc_drop": 0.018431591577061913,
+      "std": 0.0018942877580303999
+    },
+    {
+      "feature": "hours_per_week",
+      "auc_drop": 0.012404874180697667,
+      "std": 0.0013839243954886606
+    },
+    {
+      "feature": "relationship",
+      "auc_drop": 0.010421702829292468,
+      "std": 0.00046180558029381487
+    },
+    {
+      "feature": "sex",
+      "auc_drop": 0.006442378357772727,
+      "std": 0.0013762245440656
+    },
+    {
+      "feature": "capital_loss",
+      "auc_drop": 0.00524411528788069,
+      "std": 0.0003171972965663356
+    },
+    {
+      "feature": "workclass",
+      "auc_drop": 0.0023111061016756417,
+      "std": 0.0007564173347235936
+    },
+    {
+      "feature": "native_country",
+      "auc_drop": 0.0011807605911378304,
+      "std": 0.0007073652474429846
+    },
+    {
+      "feature": "race",
+      "auc_drop": 0.0007884668134065187,
+      "std": 0.000595587483635345
+    }
+  ]
+}

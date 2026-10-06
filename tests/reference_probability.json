@@ -1,0 +1,18 @@
+{
+  "record": {
+    "age": 39,
+    "education_num": 13,
+    "capital_gain": 2174,
+    "capital_loss": 0,
+    "hours_per_week": 40,
+    "workclass": "State-gov",
+    "marital_status": "Never-married",
+    "occupation": "Adm-clerical",
+    "relationship": "Not-in-family",
+    "race": "White",
+    "sex": "Male",
+    "native_country": "United-States"
+  },
+  "proba": 0.33055269718170166,
+  "tolerance": 0.001
+}

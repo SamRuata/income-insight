@@ -1,139 +1,258 @@
-# Income-Insight — Three-Cloud Template (Tabular Classifier)
+# Income-Insight — A Cloud-Deployed Neural Network for Adult-Income Classification
 
-> The same three-cloud architecture as the base template
-> (**Streamlit UI ⇄ FastAPI Model API ⇄ Supabase Data**), with the middle box
-> swapped for a **PyTorch MLP + sklearn preprocessing pipeline** doing tabular
-> binary classification. Start from *Regress-It*; the deploy steps are identical,
-> so follow the main
-> [three-cloud TUTORIAL](../three-cloud/TUTORIAL.md).
+**Name:** Lal Ruata
+**Course / Section:** CST-435 [SECTION]
+**GitHub:** https://github.com/SamRuata/income-insight
+**Streamlit Cloud (UI):** https://income-insight-p4zakakgqh2l6u75uiugnt.streamlit.app
+**Render.com (API):** https://income-insight-api-llvr.onrender.com
+**Supabase project ref:** `blzijdsrhazxmrscpfdw`
+**Product presentation (video):** [ADD LINK]
+**Engineering report:** below, in this README
 
-## Live deployment URLs (fill these in)
+> The Render API runs on the free tier and sleeps when idle. The first request after a quiet period can take up to 60 seconds.
 
-| Tier | Platform | URL |
-|------|----------|-----|
-| **UI** | Streamlit Community Cloud | `https://<your-app>.streamlit.app` |
-| **API** | Render.com | `https://<your-api>.onrender.com` |
-| **Data** | Supabase | `https://<your-project-ref>.supabase.co` |
+## Product pitch
 
-> Replace the placeholders with your real URLs once deployed.
+Income-Insight is a self-service tool for workforce-policy analysts who need to
+understand, not just use, a neural network. An analyst can score a single
+record or a whole CSV, see the calibrated probability behind every prediction,
+compare three trained configurations side by side, and — in the same interface
+— audit how the model's errors fall across sex and race. Every prediction is
+written to Postgres with a hash of its inputs and the run that served it, so a
+fairness review run six months from now reproduces exactly what the model did
+today. The tool is built to make the model's limits as visible as its accuracy.
 
 ---
-
-## What it does
-
-Income-Insight predicts whether a person's income exceeds \$50K from a handful of
-tabular features (Adult-Income shaped, but **synthetic**). You pick the hidden
-width, learning rate, batch size, and epochs; the API standardizes the numeric
-features, one-hot-encodes the categoricals, trains an MLP with Adam + BCE loss,
-reports held-out **accuracy / precision / recall / F1 / ROC-AUC**, and persists
-every run. The UI lets you train, score individual records, review run history,
-and the API exposes a fairness `/audit` view over logged predictions.
-
-## What changed from the base template (the reusable pattern in action)
-
-The three-cloud split and the file layout are identical to *Regress-It*. Only the
-middle box changed:
-
-| Aspect | Regress-It | Income-Insight |
-|--------|------------|----------------|
-| Model | `nn.Linear(1,1)` + SGD | MLP (`Linear→ReLU→Linear`) + Adam |
-| Preprocessing | none | sklearn `ColumnTransformer` (scale + one-hot) |
-| Task | regression | binary classification |
-| Metrics | MSE / MAE / R² | accuracy / precision / recall / F1 / ROC-AUC |
-| Feature | one scalar `x` | a record of 7 named features |
-| Extra endpoints | — | `/predict_batch`, `/schema`, `/audit` |
-| Tables | datasets · runs · predictions | datasets · runs · **run_artifacts** · predictions |
-
-Everything else — UI as a thin client, API as the only writer, Supabase as the
-single source of truth, service-role vs anon keys, RLS on `runs`, the four test
-categories — is unchanged.
 
 ## Architecture
 
 ```
-┌──────────────────────┐   HTTPS/JSON    ┌──────────────────────────┐   service-role   ┌──────────────────┐
-│  Streamlit Cloud     │ ──────────────► │  FastAPI on Render        │ ───────────────► │  Supabase        │
-│  (ui/app.py)         │                 │  (api/main.py)            │   full access    │  Postgres        │
-│  thin client, no ML  │                 │  MLP + sklearn pipeline   │                  │  datasets/runs/  │
-│                      │ ◄────anon key,  │                          │                  │  run_artifacts/  │
-│                      │   read-only ────┼──────────────────────────┼──────────────────►│  predictions     │
-└──────────────────────┘   SELECT runs   └──────────────────────────┘                  │  (RLS: anon can  │
-                                                                                        │   only SELECT    │
-                                                                                        │   runs)          │
-                                                                                        └──────────────────┘
+┌──────────────────────┐   HTTPS/JSON    ┌──────────────────────────┐  service-role  ┌──────────────────┐
+│  Streamlit Cloud     │ ──────────────▶ │  FastAPI on Render        │ ─────────────▶ │  Supabase        │
+│  ui/app.py           │                 │  api/main.py              │   full access  │  Postgres        │
+│  thin client:        │                 │  PyTorch MLP +            │                │  adult_income    │
+│  no torch, no        │ ◀────────────── │  sklearn pipeline         │ ◀───────────── │  runs            │
+│  sklearn, no SQL     │                 │                           │                │  predictions     │
+└──────────┬───────────┘                 └──────────────────────────┘                └────────▲─────────┘
+           │                                                                                   │
+           └──────────────── anon key, read-only: run history + audit views ───────────────────┘
 ```
 
-## Project structure
+The Streamlit tier contains no model code. Every prediction and every training
+metric arrives over HTTPS from FastAPI. Its only direct database access is a
+read-only `SELECT` with the Supabase **anon** key, permitted by row-level
+security. The **service-role** key exists only in Render's environment
+variables and never reaches the browser.
+
+## Repository layout
 
 ```
 income-insight/
-├── README.md                 # This file
-├── MODEL_CARD.md             # Model details, fairness, limitations
-├── shared/
-│   ├── schemas.py            # Pydantic API contract
-│   └── data.py               # Synthetic Adult-Income generator + feature contract
-├── api/                      # FastAPI tier (deploys to Render)
-│   ├── main.py               # Endpoints
-│   ├── training.py           # MLP + sklearn ColumnTransformer, artifact (de)serialization
-│   ├── db.py                 # Supabase (service-role) data access
-│   ├── configs/default.yaml
-│   └── requirements.txt
-├── ui/
-│   ├── app.py                # 5-tab thin client (form built from /schema)
-│   ├── requirements.txt      # No torch / no sklearn
-│   └── .streamlit/secrets.toml.example
+├── api/
+│   ├── main.py              # 11 endpoints
+│   ├── training.py          # sklearn ColumnTransformer + PyTorch MLP
+│   ├── train.py             # CLI: trains, checkpoints, writes a runs row
+│   ├── importance.py        # CLI: permutation importance
+│   └── configs/             # baseline.yaml, deep_gelu.yaml, dropout.yaml
 ├── db/
-│   ├── migrations/001_init.sql
-│   └── seed.py
-├── tests/                    # pytest suite
-├── render.yaml               # Render blueprint
-├── requirements-dev.txt
-└── .env.example
+│   ├── migrations/001..004  # schema, adult_income, run columns, audit function
+│   └── load.py              # one-shot UCI Adult loader
+├── shared/features.py       # the 12-column feature contract, shared by all tiers
+├── models/*.joblib          # checkpoints: weights + fitted preprocessor together
+├── ui/app.py                # 6-tab Streamlit client
+└── tests/                   # pytest suite
 ```
 
-## Quickstart (local)
+## Database schema
 
-```bash
-cd income-insight
+| Table | Purpose |
+|---|---|
+| `adult_income` | One row per training example: 12 features, `income`, `label`, `split`. A real table rather than a JSON blob, so the audit can `JOIN` and `GROUP BY`. |
+| `runs` | One row per training run: architecture, hyperparameters, held-out metrics. |
+| `predictions` | One row per prediction: `request_hash`, `proba`, `label`, `run_id`, and nullable `source_row_id` / `true_label`. |
+| `datasets`, `run_artifacts` | From the template; `datasets` holds one descriptive row for the UCI dataset so `runs.dataset_id` stays a valid foreign key. |
 
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-
-pytest -q            # 6 pass; the live-Supabase test skips without creds
-
-cp .env.example .env                                   # API: SUPABASE_URL + SERVICE key
-cp ui/.streamlit/secrets.toml.example ui/.streamlit/secrets.toml
-
-uvicorn api.main:app --reload --port 8000              # terminal 1
-streamlit run ui/app.py                                # terminal 2
-```
-
-To deploy to the three clouds, follow **Part E** of the main
-[TUTORIAL](../three-cloud/TUTORIAL.md): apply
-`db/migrations/001_init.sql` in the Supabase SQL Editor → deploy the API from
-`render.yaml` on Render → deploy the UI on Streamlit Community Cloud.
+RLS is on for every table. The `anon` role may only `SELECT`.
 
 ## API endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/datasets` | Generate a synthetic tabular dataset |
-| `POST` | `/train` | Train the MLP, persist run + model artifact, return metrics |
-| `GET`  | `/runs/{run_id}` | Fetch one run |
-| `GET`  | `/runs` | List recent runs |
-| `POST` | `/predict` | Classify one record; log it |
-| `POST` | `/predict_batch` | Classify many records; log each |
-| `GET`  | `/schema` | Feature contract (drives the UI form) |
-| `GET`  | `/audit` | Positive-prediction rate grouped by a categorical feature |
-| `GET`  | `/healthz` | Liveness / DB ping |
-| `GET`  | `/version` | Build SHA + torch/sklearn versions |
+`POST /predict` · `POST /predict_batch` · `POST /score_test_sample` ·
+`GET /schema` · `GET /audit` · `GET /runs` · `GET /runs/{id}` ·
+`GET /performance` · `GET /healthz` · `GET /version`
 
-## Checklist
+`/score_test_sample` scores held-out rows *with* their ground truth, which is
+what makes error-rate fairness metrics computable — a record typed into the UI
+by hand has no true label and can only contribute to a positive-prediction rate.
 
-- [ ] Three live URLs listed at the top of this README
-- [ ] `datasets`, `runs`, `run_artifacts`, `predictions` tables with RLS
-- [ ] 6+ API endpoints
-- [ ] 5 Streamlit tabs (Concepts, Train, Predict, Run History, Model Card)
-- [ ] MLP training with held-out accuracy/precision/recall/F1/ROC-AUC
-- [ ] pytest suite passing
-- [ ] `MODEL_CARD.md` completed
+## Running locally
+
+```bash
+py -3.12 -m venv .venv && .venv\Scripts\activate
+pip install -r requirements-dev.txt
+cp .env.example .env                      # SUPABASE_URL + SERVICE key
+python -m db.load                         # loads 32,561 rows
+python -m api.train --config api/configs/baseline.yaml
+uvicorn api.main:app --reload --port 8000 # terminal 1
+streamlit run ui/app.py                   # terminal 2
+```
+
+## Configuration comparison
+
+Generated by a SQL query against `runs`:
+
+```sql
+select config_name, hidden_sizes, activation, dropout,
+       round(accuracy::numeric,4) as accuracy, round(precision::numeric,4) as precision,
+       round(recall::numeric,4) as recall, round(f1::numeric,4) as f1,
+       round(roc_auc::numeric,4) as roc_auc, best_epoch
+from runs order by roc_auc desc;
+```
+
+| config | hidden | activation | dropout | accuracy | precision | recall | F1 | ROC-AUC | best epoch |
+|---|---|---|---|---|---|---|---|---|---|
+| dropout | 64,32 | relu | 0.3 | 0.8099 | 0.5699 | 0.8638 | 0.6867 | 0.9161 | 28 |
+| baseline | 64,32 | relu | 0.0 | 0.8076 | 0.5661 | 0.8670 | 0.6849 | 0.9156 | 13 |
+| deep_gelu | 128,64,32 | gelu | 0.0 | 0.8082 | 0.5673 | 0.8644 | 0.6850 | 0.9152 | 23 |
+
+## Permutation importance
+
+`python -m api.importance --config baseline` — each feature shuffled 5× across
+6,512 test rows; the figure is the resulting drop in ROC-AUC.
+
+| Feature | ROC-AUC drop | sd |
+|---|---|---|
+| marital_status | 0.0569 | 0.0029 |
+| capital_gain | 0.0372 | 0.0018 |
+| age | 0.0372 | 0.0014 |
+| education_num | 0.0327 | 0.0009 |
+| occupation | 0.0184 | 0.0019 |
+| hours_per_week | 0.0124 | 0.0014 |
+| relationship | 0.0104 | 0.0005 |
+| sex | 0.0064 | 0.0014 |
+| capital_loss | 0.0052 | 0.0003 |
+| workclass | 0.0023 | 0.0008 |
+| native_country | 0.0012 | 0.0007 |
+| race | 0.0008 | 0.0006 |
+
+## Tests
+
+`pytest -q` — covers schema validation for `/predict`, a row-count test for
+`/predict_batch`, a regression test pinning a frozen reference row's
+probability to ±1e-3, and a Supabase round trip confirming `/predict` writes a
+row with ground truth attached. The round-trip test creates and deletes its own
+fixture row.
+
+---
+
+# Engineering Report
+
+## Decision justifications
+
+**(a) Activation: ReLU, and it did not outperform the alternative.** I trained
+three configurations that differ in one dimension each. The honest result is
+that they are indistinguishable: ROC-AUC spans 0.9152 to 0.9161, a range of
+0.0009, which is smaller than the variation I would expect from reseeding.
+GELU's smooth gradient near zero is supposed to help in deep networks where
+dying-ReLU units accumulate across layers; with two hidden layers and roughly
+90 input dimensions there is no depth for that problem to develop, so the
+smoother activation buys nothing. Dropout likewise changed almost nothing,
+which tells me the model was not overfitting in the first place — consistent
+with a training loss that never fell far below validation loss. I therefore
+deployed `baseline`, the shallowest and plainest of the three, on the grounds
+that when models are statistically tied the right choice is the cheapest one:
+it reached its best epoch at 13 against 23 and 28 for the others, less than
+half the training compute for the same result. Claiming GELU "won" on a
+0.0004 ROC-AUC margin would be reading noise as signal.
+
+**(b) The confusion matrix shows the positive class is much harder.** On the
+6,512-row test split the baseline model produces roughly 3,897 true negatives,
+1,044 false positives, 209 false negatives, and 1,362 true positives. Recall on
+the >$50K class is 0.867 while precision is 0.566 — so of every three records
+the model flags as high earners, roughly one actually is not. The ≤$50K class
+is comparatively easy because it is 75.9% of the data and a model can score
+well on it by defaulting. The positive class is hard for two reasons: it is the
+minority, and I deliberately made it harder to miss by weighting the loss with
+`pos_weight ≈ 3.2`. Without that weighting the model drifts toward predicting
+"≤50K" universally, which scores 75.9% accuracy and is useless. The weighting
+converts a precision problem into a recall advantage, which is defensible for
+an exploratory tool and would be indefensible if a positive flag triggered a
+consequence for a person.
+
+**(c) Marital status drives the predictions.** Permutation importance over the
+test split ranks `marital_status` first by a wide margin (ROC-AUC drop 0.0569),
+followed by `capital_gain` and `age` (0.0372 each) and `education_num`
+(0.0327). The economic features behave as expected. What stands out is that a
+relational category outranks every measure of work and education — being
+married is a stronger signal of earning >$50K in this data than hours worked
+(0.0124) or occupation (0.0184). The model has not discovered something about
+marriage; it has absorbed the household structure of the 1994 labour force,
+where married men were disproportionately the earners recorded.
+
+## Bias and fairness
+
+Over 2,500 audited predictions, computed in Postgres by joining `predictions`
+to ground truth in `adult_income`:
+
+| Group | n | False positive rate | False negative rate | Predicted >50K | Accuracy |
+|---|---|---|---|---|---|
+| Male | 1,719 | 30.7% | **12.0%** | 47.6% | 74.9% |
+| Female | 781 | 6.4% | **25.8%** | 14.5% | 91.3% |
+
+Women who genuinely earn more than $50,000 are missed at **2.2 times** the rate
+of men. The same pattern appears by race: 23.8% false negatives for Black
+respondents against 13.3% for White respondents.
+
+The trap in this table is the accuracy column. Women are classified correctly
+91.3% of the time against 74.9% for men, so a report leading with accuracy
+would conclude the model treats women well. It does not. It predicts ">50K" for
+only 14.5% of women, and because few women in the data earn that much, being
+broadly negative is a cheap way to be broadly right. High accuracy here is a
+symptom of the problem rather than evidence against it.
+
+The disparity does not arrive through the `sex` column. Permutation importance
+ranks `sex` eighth of twelve at 0.0064 and `race` last at 0.0008, while
+`marital_status` — whose values interact with `relationship` categories
+literally named "Husband" and "Wife" — is the strongest feature in the model.
+Deleting the protected attributes would therefore change the predictions
+very little and would destroy the audit that detects the gap. Fairness through
+unawareness does not work when the proxies are this strong.
+
+A responsible deployment would do four things. It would publish the
+group-specific error rates next to the headline accuracy, as this product does
+in its Bias Audit tab rather than in a footnote. It would set per-group
+thresholds or apply an equalized-odds correction so the false-negative rates
+converge, accepting a lower aggregate score in exchange. It would restrict the
+tool to population-level analysis and prohibit individual decisions outright.
+And it would keep the audit running continuously against logged predictions,
+because a fairness check performed once at launch says nothing about the model
+six months later.
+
+## Worldview reflection
+
+"You shall not be partial in judgment" (Deuteronomy 1:17, ESV). The verse is
+addressed to judges, and it is worth noticing what it does not say: it does not
+ask whether partiality was intended. A judge who ruled unevenly through
+inattention rather than malice would still have failed the command. I did not
+set out to build a model that treats women worse, and that is exactly why the
+warning applies — partiality in a statistical system is something you inherit
+by default and have to work to remove.
+
+Stated plainly: **my model treats women worse than men, and Black respondents
+worse than White respondents.** It misses genuinely high-earning women at more
+than double the rate it misses high-earning men. If this classifier were
+screening applicants, a qualified woman would be passed over twice as often as
+an equally qualified man, and the summary statistics would report the system as
+performing well.
+
+What I owe that group before deployment is more than a disclaimer. First,
+disclosure in the product itself rather than buried in documentation —
+anyone using this tool sees the error-rate table, not only the accuracy
+figure. Second, correction, not merely measurement: knowing the gap and
+shipping anyway converts an inherited bias into a chosen one. Third, restraint
+about scope, which is why the model card forbids individual decisions in plain
+language. And fourth, honesty about the source — the model is accurately
+describing 1994, and treating its output as a statement about what people are
+capable of, rather than what a particular labour market recorded, would be the
+real injustice. Scripture's standard is impartiality in judgment, and a system
+that quietly distributes its errors along lines of sex and race is making a
+judgment whether or not anyone intended it to.
