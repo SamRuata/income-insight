@@ -1,57 +1,91 @@
-"""Numerical test: the MLP recovers the synthetic ground-truth signal.
+"""Numerical tests: the pipeline and the MLP actually learn.
 
-We generate data from a known logistic rule, train through both the unit function
-and the API, and assert accuracy clears a floor.
-Also exercises the predict + audit round trip through the in-memory store.
+These use a small synthetic frame with the real column names rather than the
+32k-row table, so the suite stays fast and runs without network access.
 """
-from __future__ import annotations
+import numpy as np
+import pandas as pd
+import pytest
 
-from shared.data import generate_tabular
-from api.training import train_income_classifier
-
-
-def test_classifier_recovers_signal_unit():
-    records, labels = generate_tabular(n_rows=2000, noise=1.0, seed=1)
-    metrics, model_b64, loss = train_income_classifier(
-        records, labels, hidden_dim=32, lr=0.01, batch_size=64, epochs=150
-    )
-    assert metrics["accuracy"] > 0.8
-    assert metrics["roc_auc"] > 0.85
-    assert loss[-1] < loss[0]  # training loss decreased
-    assert isinstance(model_b64, str) and len(model_b64) > 0
+from api.training import MLP, build_preprocessor, calibration_curve, compute_metrics, train_model
+from shared.features import CATEGORICAL_COLS, FEATURE_COLS, NUMERIC_COLS
 
 
-def test_train_and_predict_endpoint(client):
-    ds = client.post(
-        "/datasets", json={"name": "gt", "n_rows": 1500, "noise": 1.0}
-    ).json()
-    resp = client.post(
-        "/train",
-        json={"dataset_id": ds["id"], "hidden_dim": 32, "lr": 0.01,
-              "batch_size": 64, "epochs": 150},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["metrics"]["accuracy"] > 0.8
-    run_id = body["run_id"]
+def make_frame(n: int = 600, seed: int = 0) -> pd.DataFrame:
+    """A learnable signal: older people working longer hours earn more.
+    Includes NULLs so the imputer is exercised."""
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({
+        "age": rng.integers(18, 70, n),
+        "education_num": rng.integers(1, 16, n),
+        "capital_gain": rng.integers(0, 500, n),
+        "capital_loss": np.zeros(n, dtype=int),
+        "hours_per_week": rng.integers(10, 70, n),
+        "workclass": rng.choice(["Private", "State-gov", None], n),
+        "marital_status": rng.choice(["Married-civ-spouse", "Never-married"], n),
+        "occupation": rng.choice(["Sales", "Exec-managerial", None], n),
+        "relationship": rng.choice(["Husband", "Not-in-family"], n),
+        "race": rng.choice(["White", "Black"], n),
+        "sex": rng.choice(["Male", "Female"], n),
+        "native_country": rng.choice(["United-States", "Mexico"], n),
+    })
+    score = 0.06 * df["age"] + 0.05 * df["hours_per_week"] - 5.0
+    df["label"] = (score + rng.normal(0, 0.3, n) > 0).astype(int)
+    df["split"] = np.where(rng.random(n) < 0.2, "test", "train")
+    return df
 
-    # A clearly high-income record should lean toward >50K.
-    high = {
-        "age": 50, "education_num": 16, "hours_per_week": 55, "capital_gain": 8000,
-        "workclass": "Self-emp", "marital_status": "Married", "occupation": "Exec",
-    }
-    pred = client.post("/predict", json={"run_id": run_id, "features": high}).json()
-    assert pred["label"] in (0, 1)
-    assert 0.0 <= pred["proba"] <= 1.0
 
-    # Batch predict + audit round trip.
-    batch = client.post(
-        "/predict_batch", json={"run_id": run_id, "records": [high, high]}
-    ).json()
-    assert len(batch["predictions"]) == 2
+def test_preprocessor_imputes_and_encodes():
+    df = make_frame()
+    pre = build_preprocessor()
+    X = pre.fit_transform(df[FEATURE_COLS])
+    assert not np.isnan(X).any(), "NULLs survived the imputer"
+    # One-hot expansion means more columns out than in.
+    assert X.shape[1] > len(NUMERIC_COLS) + len(CATEGORICAL_COLS)
+    assert X.shape[0] == len(df)
 
-    audit = client.get(
-        "/audit", params={"run_id": run_id, "by": "occupation"}
-    ).json()
-    assert audit["total"] >= 3
-    assert audit["groups"]
+
+def test_unseen_category_does_not_crash():
+    """handle_unknown='ignore' keeps serving when a new category appears."""
+    df = make_frame()
+    pre = build_preprocessor()
+    pre.fit(df[FEATURE_COLS])
+    novel = df.head(1).copy()
+    novel["native_country"] = "Atlantis"
+    out = pre.transform(novel[FEATURE_COLS])
+    assert out.shape[0] == 1
+
+
+def test_mlp_requires_two_hidden_layers():
+    with pytest.raises(ValueError):
+        MLP(input_dim=10, hidden_sizes=[16])
+
+
+def test_model_learns_the_signal():
+    """The headline numerical test: accuracy and AUC must beat chance by a
+    wide margin on data with a known relationship."""
+    df = make_frame()
+    config = {"name": "test", "hidden_sizes": [32, 16], "activation": "relu",
+              "dropout": 0.0, "lr": 0.005, "weight_decay": 0.0,
+              "batch_size": 64, "epochs": 15, "patience": 5, "seed": 0}
+    _, _, results = train_model(df, config)
+    m = results["metrics"]
+    assert m["accuracy"] > 0.75, f"accuracy only {m['accuracy']:.3f}"
+    assert m["roc_auc"] > 0.80, f"roc_auc only {m['roc_auc']:.3f}"
+    assert results["n_test"] > 0
+
+
+def test_metrics_are_internally_consistent():
+    y = np.array([0, 0, 1, 1])
+    proba = np.array([0.1, 0.9, 0.2, 0.8])
+    m = compute_metrics(y, proba)
+    cm = m["confusion"]
+    assert cm["tn"] + cm["fp"] + cm["fn"] + cm["tp"] == len(y)
+    assert m["accuracy"] == pytest.approx((cm["tn"] + cm["tp"]) / len(y))
+
+
+def test_calibration_bins_cover_predictions():
+    y = np.random.default_rng(0).integers(0, 2, 200)
+    proba = np.random.default_rng(1).random(200)
+    bins = calibration_curve(y, proba, n_bins=5)
+    assert sum(b["count"] for b in bins) == len(proba)
