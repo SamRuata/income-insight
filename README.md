@@ -1,12 +1,12 @@
 # Income-Insight — A Cloud-Deployed Neural Network for Adult-Income Classification
 
 **Name:** Lal Ruata
-**Course / Section:** CST-435 [SECTION]
+**Course / Section:** CST-435 
 **GitHub:** https://github.com/SamRuata/income-insight
 **Streamlit Cloud (UI):** https://income-insight-p4zakakgqh2l6u75uiugnt.streamlit.app
 **Render.com (API):** https://income-insight-api-llvr.onrender.com
 **Supabase project ref:** `blzijdsrhazxmrscpfdw`
-**Product presentation (video):** [ADD LINK]
+**Product presentation (video):** [https://youtu.be/nNMJ3PLBFD4]
 **Engineering report:** below, in this README
 
 > The Render API runs on the free tier and sleeps when idle. The first request after a quiet period can take up to 60 seconds.
